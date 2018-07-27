@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Web音乐播放器2.0</title>
+    <link rel="shortcut icon" href="res/app_music.png" type="image/x-icon"/>
+    <link rel="stylesheet" href="css/jquery.mobile-1.4.5.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <script src="js/jquery.min.js"></script>
+    <script src="js/jquery.mobile-1.4.5.min.js"></script>
+    <script src="JavaScript-ID3-Reader/dist/id3-minimized.js"></script>
+</head>
+<body>
+    <div class="navContainer">
+        <div>
+            <a href="#default"><button id="btn-default">默认列表</button></a>
+            <a href="#online"><button id="btn-online">在线搜索</button></a>
+        </div>
+    </div>
+    <div data-role="page" id="default">
+        <div data-role="content" id="defaultContent"></div>
+    </div>
+    <div data-role="page" id="online">
+        <div data-role="content" id="onlineContent">
+            <input type="text" id="searchContent" placeholder="搜索歌曲、歌手" style="text-align: center;font-size: 14px;line-height: 1.7;">
+        </div>
+    </div>
+    <audio></audio>
+    <div id="controller">
+        <img id="picture">
+        <div id="messages">
+            <marquee id="title"></marquee>
+            <span id="artist"></span>
+            <span id="music_time"></span>
+        </div>
+        <div id="play_control">
+            <div id="previous"></div>
+            <div id="play_pause_controller"></div>
+            <div id="next"></div>
+        </div>
+        <div id="loopPlayback"></div>
+        <progress id="music_progress" value="0" max="100"></progress>
+    </div>
+    <img id="preloader" src="res/preloader.gif">
+    <script>
+        var audio = $('audio')[0];
+        var title = $('#title')[0];
+        var artist = $('#artist')[0];
+        var picture = $('#picture')[0];
+        var music_progress = $('progress')[0];
+
+        var deg = 0;
+        var timer2 = null;
+        var loopPlayback = 'all';
+        var lastLoopPlayback;
+        var defaultArray = new Array();
+        var onlineArray = new Array();
+        var currentMusic = 1; //1是默认，2是在线
+        var currentMusicId = 0;
+        var lastMusicId = 0;
+        var lastInput;
+        var currentInput;
+        var onlineListChanged;
+
+        $(document).ready(function() {
+            if (window.location.href.substr(-7) == '#online') {
+                $('#btn-online').css({'background':'gray','color':'white'});
+            }else{
+                $('#btn-default').css({'background':'gray','color':'white'});
+            }
+            $('#btn-default').click(function () {
+                $('#btn-online').css({'background':'#ccc','color':'black'});
+                $('#btn-default').css({'background':'gray','color':'white'});
+            });
+            $('#btn-online').click(function () {
+                $('#btn-default').css({'background':'#ccc','color':'black'});
+                $('#btn-online').css({'background':'gray','color':'white'});
+            });
+            $('#defaultContent').on('swipeleft',function() {
+                $('#btn-online').trigger('click');
+            });
+            $('#onlineContent').on('swiperight',function() {
+                $('#btn-default').trigger('click');
+            });
+
+            $('#searchContent').blur(function(){
+                if ($.trim($(this).val()) == '') {
+                    $(this).val('');
+                }
+            });
+
+            $('#online').keyup(function(event){
+                if (event.keyCode == 13) {
+                    loadOnlineList();
+                }
+            });
+            
+            autoFix();
+            window.onresize = autoFix;
+            loadDefaultList();
+
+            //封面加载失败时的操作
+            $('#picture').error(function(){
+                $(this).attr('src','res/media_playback_default_album.png');
+                $('body').css({'background':'url(res/media_playback_default_album.png)','background-size':'100% 100%'});
+            });
+            
+            //播放按钮设置
+            $('#play_pause_controller').click(function(){
+                if (audio.src != '') {
+                    clearInterval(timer2);
+                    if(audio.paused){
+                        audio.play();
+                        $(this).css('background-image','url(res/nowplaying_bar_pause_n.png)');
+                        setTimer2();
+                    }else{
+                        audio.pause();
+                        $(this).css('background-image','url(res/nowplaying_bar_play_n.png)');
+                    }
+                }
+            });
+
+            //上一曲算法
+            previous.onclick = function(){
+                if(lastLoopPlayback == null){
+                    if (audio.paused) {
+                        var isPaused = true;
+                    }
+                    if (currentMusic == 1) {
+                        if (currentMusicId > 0) {
+                            currentMusicId--;
+                            audio.src = defaultArray[currentMusicId];
+                        }else{
+                            return;
+                        }
+                    }else{
+                        if (currentMusicId > 0) {
+                            currentMusicId--;
+                            audio.src = onlineArray[currentMusicId][0];
+                        }else{
+                            return;
+                        }
+                    }
+                    if (isPaused) {
+                        loadMessages();
+                    }else{
+                        clearInterval(timer2);
+                        audio.play();
+                        loadMessages();
+                        setTimer2();
+                    }
+                }
+            }
+
+            //下一曲算法
+            next.onclick = function(){
+                if(lastLoopPlayback == null){
+                    if (audio.paused) {
+                        var isPaused = true;
+                    }
+                    if (currentMusic == 1) {
+                        if (currentMusicId < defaultArray.length-1) {
+                            currentMusicId++;
+                            audio.src = defaultArray[currentMusicId];
+                        }else{
+                            return;
+                        }
+                    }else{
+                        if (currentMusicId < onlineArray.length-1) {
+                            currentMusicId++;
+                            audio.src = onlineArray[currentMusicId][0];
+                        }else{
+                            return;
+                        }
+                    }
+                    if (isPaused) {
+                        loadMessages();
+                    }else{
+                        clearInterval(timer2);
+                        audio.play();
+                        loadMessages();
+                        setTimer2();
+                    }
+                }
+            }
+
+            //设置循环播放
+            $('#loopPlayback').click(function(){
+                if(lastLoopPlayback == null){
+                    switch (loopPlayback) {
+                        case 'all':
+                            loopPlayback = 'current';
+                            $(this).css('background-image','url(res/tool_repeat_current_n.png)');
+                            break;
+                        case 'current':
+                            loopPlayback = 'shuffle';
+                            $(this).css('background-image','url(res/tool_repeat_shuffle_n.png)');
+                            break;
+                        case 'shuffle':
+                            loopPlayback = 'all';
+                            $(this).css('background-image','url(res/tool_repeat_all_n.png)');
+                    }
+                }
+            });
+        });
+
+        //自适应宽高变化
+        function autoFix() {
+            if (document.body.clientWidth <= 525) {
+                picture.style.display = "none";
+                title.style.left = "8px";
+                artist.style.left = "8px";
+                music_progress.style.left = "8px";
+                music_progress.style.width = parseInt(document.body.clientWidth-16)+'px';
+            }else{
+                picture.style.display = "block";
+                title.style.left = "80px";
+                artist.style.left = "80px";
+                music_progress.style.left = "80px";
+                music_progress.style.width = parseInt(document.body.clientWidth-88)+'px';
+            }
+
+            //列表调整
+            $('#defaultContent').css('width',document.body.clientWidth - 32 + 'px');
+            $('#onlineContent').css('width',document.body.clientWidth - 32 + 'px');
+            $('#defaultContent').css('height',document.body.clientHeight - 140 + 'px');
+            $('#onlineContent').css('height',document.body.clientHeight - 140 + 'px');
+        }
+
+        //加载当前歌曲信息
+        function loadMessages(){
+            if (currentMusic == 1) {
+                ID3.loadTags(audio.src, function() {
+                    showTags(audio.src);
+                }, {
+                    tags: ["title","artist","album","picture"]
+                });
+            }else{
+                $('#title')[0].textContent = onlineArray[currentMusicId][1];
+                $('#artist')[0].textContent = onlineArray[currentMusicId][2] || '';
+                $('#picture')[0].src = onlineArray[currentMusicId][3] || 'res/media_playback_default_album.png';
+                $('body').css({'background':'url('+(onlineArray[currentMusicId][3]?onlineArray[currentMusicId][3]:'res/media_playback_default_album.png')+')','background-size':'100% 100%'});
+            }
+        }
+
+        function showTags(url) {
+            var tags = ID3.getAllTags(url);
+            console.log(tags);
+            title.textContent = tags.title || defaultArray[currentMusicId].substr(22).replace('.mp3','');
+            artist.textContent = tags.artist || "";
+            //   document.getElementById('album').textContent = tags.album || "";
+            var image = tags.picture;
+            if (image) {
+                var base64String = "";
+                for (var i = 0; i < image.data.length; i++) {
+                    base64String += String.fromCharCode(image.data[i]);
+                }
+                var base64 = "data:" + image.format + ";base64," + window.btoa(base64String);
+                picture.src=base64;
+                $('body').css({'background':'url('+base64+')','background-size':'100% 100%'});
+            } else {
+                picture.src = 'res/media_playback_default_album.png';
+                $('body').css({'background':'url(res/media_playback_default_album.png)','background-size':'100% 100%'});
+            }
+        }
+        
+        //加载默认列表
+        function loadDefaultList(){
+            jQuery.ajax({
+                url: 'get_urls.php',
+                data: {path:'all'},
+                dataType: 'json',
+                success: function(result) {
+                    for (var i = 0,j = 0; i < result.length; i++) {
+                        if (result[i]!=false) {
+                            defaultArray[j++] = result[i];
+                        }
+                    }
+                    audio.src = defaultArray[currentMusicId];
+                    loadMessages();
+                    for (var i = 0; i < defaultArray.length; i++) {
+                        $('#defaultContent').append('<div class="playlist" id="default-'+i+'" onclick="play(this.id)"><p><span>'+((i+1)<10?'0'+(i+1):(i+1))+'</span>&nbsp;&nbsp;<nobr>'+defaultArray[i].split('/')[5].replace('.mp3','')+'</nobr></p></div>');
+                    }
+
+                    //定时器，动态更新进度条和时间等信息
+                    var timer = setInterval(function() {
+                        showStatus();
+                    }, 10);
+                }
+            });
+        }
+
+        //加载在线列表
+        function loadOnlineList(){
+
+            var searchContent = $.trim($('#searchContent').val());
+
+            if (searchContent != '') {
+
+                currentInput = searchContent;
+                $('#searchContent').val(searchContent);
+
+                //检测列表更改
+                onlineListChanged = false;
+                if (currentInput != lastInput && lastInput != null) {
+                    onlineListChanged = true;
+                }
+                
+                //判断是否需要禁用循环及上下曲，新的列表和当前歌曲所在列表不一致则需根据lastLoopPlayback是否不为空来判断是否禁用
+                if(onlineListChanged && currentMusic == 2){
+                    lastLoopPlayback = loopPlayback;
+                    loopPlayback = '';
+                }else{
+                    if(lastLoopPlayback != null)
+                        loopPlayback = lastLoopPlayback;
+                    lastLoopPlayback = null;
+                }
+
+                onlineArray = []; //清空数组
+                $('.ui-input-text').nextAll().remove();
+                $('#preloader').show();
+
+                jQuery.ajax({
+
+                    url: "kugou/index.php",
+
+                    data: {content:searchContent},
+
+                    type: "POST",
+
+                    dataType: 'json',
+
+                    success: function(result) {
+                        for (var i = 0,j = 0; i < result.length; i++) {
+                            if (result[i] != false) {
+                                onlineArray[j] = new Array();
+                                onlineArray[j][0] = result[i][0];
+                                onlineArray[j][1] = result[i][1];
+                                onlineArray[j][2] = result[i][2];
+                                onlineArray[j][3] = result[i][3];
+                                $('#onlineContent').append('<div class="playlist" id="online-'+j+'" onclick="play(this.id)"><p><span>'+((j+1)<10?'0'+(j+1):(j+1))+'</span>&nbsp;&nbsp;<nobr>'+(onlineArray[j][2]?onlineArray[i][2]+' - ':'')+onlineArray[j][1]+'</nobr></p></div>');
+                                j++;
+                            }
+                        }
+                        $('#preloader').hide();
+                    },
+                    error:function(er){
+                        $('#preloader').hide();
+                    }
+                });
+            }else{
+                $('#searchContent').val('');
+            }
+        }
+        
+        //列表播放
+        function play(listId) {
+            if (audio.paused) {
+                $('#play_pause_controller').css('background-image','url(res/nowplaying_bar_pause_n.png)');
+                setTimer2();
+            }
+            if (listId.indexOf('default') != -1) {
+                $('#online-'+lastMusicId).css('color','black');
+                currentMusicId = listId.substr(8);
+                audio.src = defaultArray[currentMusicId];
+                currentMusic = 1;
+            }else{
+                $('#default-'+lastMusicId).css('color','black');
+                currentMusicId = listId.substr(7);
+                audio.src = onlineArray[currentMusicId][0];
+                currentMusic = 2;
+                lastInput = currentInput;
+                onlineListChanged = false;
+            }
+            
+            //判断是否需要还原循环设置
+            if(lastLoopPlayback != null){
+                loopPlayback = lastLoopPlayback;
+                lastLoopPlayback = null;
+            }
+            audio.play();
+            loadMessages();
+        }
+
+        //显示当前播放状态
+        function showStatus() {
+
+            if (audio.src != '') {
+                //返回音乐时长
+                var music_time = audio.duration;
+                var now_time = audio.currentTime;
+                var minutes = parseInt(music_time / 60);
+                var seconds = parseInt(music_time - minutes * 60);
+                minutes = minutes < 10 ? '0' + minutes : minutes;
+                seconds = seconds < 10 ? '0' + seconds : seconds;
+
+                //返回播放时长
+                var seconds_now = parseInt(now_time % 60);
+                var minutes_now = parseInt(now_time / 60);
+                seconds_now = seconds_now < 10 ? '0' + seconds_now : seconds_now;
+                minutes_now = minutes_now < 10 ? '0' + minutes_now : minutes_now;
+
+                //显示到文本中
+                $('#music_time')[0].innerHTML = minutes_now + ":" + seconds_now + "/" + minutes + ":" + seconds;
+
+                //显示到音乐进度条中
+                var plan = parseFloat(now_time / music_time);
+                var value = parseInt(plan * 100);
+                music_progress.setAttribute("value",value);
+            }else{
+                $('#music_time')[0].innerHTML = "00:00/00:00";
+            }
+
+            //列表显示正在播放的歌曲
+            if (currentMusic == 1) {
+                if (lastMusicId != currentMusicId) {
+                    $("#default-"+lastMusicId).css('color','black');
+                    lastMusicId = currentMusicId;
+                }else{
+                    if (audio.paused) {
+                        $("#default-"+currentMusicId).css('color','black');
+                    }else{
+                        $("#default-"+currentMusicId).css('color','red');
+                    }
+                }
+            }else{
+                if (!onlineListChanged) {
+                    if (lastMusicId != currentMusicId) {
+                        $("#online-"+lastMusicId).css('color','black');
+                        lastMusicId = currentMusicId;
+                    }else{
+                        if (audio.paused) {
+                            $("#online-"+currentMusicId).css('color','black');
+                        }else{
+                            $("#online-"+currentMusicId).css('color','red');
+                        }
+                    }
+                }
+            }
+
+            //歌曲结束时
+            if (audio.ended) {
+                console.log("end");
+                switch (loopPlayback) {
+                    case 'all': //列表循环
+                        if (currentMusic == 1) {
+                            if (currentMusicId == defaultArray.length-1) {
+                                currentMusicId = 0;
+                            }else{
+                                currentMusicId++;
+                            }
+                            audio.src = defaultArray[currentMusicId];
+                        }else{
+                            if (currentMusicId == onlineArray.length-1) {
+                                currentMusicId = 0;
+                            }else{
+                                currentMusicId++;
+                            }
+                            audio.src = onlineArray[currentMusicId][0];
+                        }
+                        clearInterval(timer2);
+                        audio.play();
+                        loadMessages();
+                        setTimer2();
+                        break;
+                    case 'current': //单曲循环
+                        audio.play();
+                        break;
+                    case 'shuffle': //随机播放
+                        if (currentMusic == 1) {
+                            currentMusicId = parseInt(Math.random()*defaultArray.length);
+                            audio.src = defaultArray[currentMusicId];
+                        }else{
+                            currentMusicId = parseInt(Math.random()*onlineArray.length);
+                            audio.src = onlineArray[currentMusicId][0];
+                        }
+                        clearInterval(timer2);
+                        audio.play();
+                        loadMessages();
+                        setTimer2();
+                        break;
+                    default: //已禁用循环,则结束播放
+                        deg = 0;
+                        $('#play_pause_controller').css('background-image','url(res/nowplaying_bar_play_n.png)'); //显示控制器状态
+                        audio.currentTime = 0;
+                        picture.style.transform = "rotate(0deg)";
+                        clearInterval(timer2);
+                        timer2 = null;
+                }
+            }
+        }
+
+        //设置封面转动
+        function setTimer2() {
+            timer2 = setInterval(function() {
+            if (deg == 360) { deg = 0; }
+                deg += 2;
+                console.log(deg);
+                picture.style.transform = "rotate(" + deg + "deg)";
+            }, 50);
+        }
+
+        //进度调节
+        music_progress.onclick = function(event) {
+            var e = event ? event : window.event;
+            var start;
+            console.log(e.pageX);
+            if (document.body.clientWidth <= 525) {
+                start = 6;
+                audio.currentTime = (e.pageX - start) * audio.duration / parseInt(document.body.clientWidth-16);
+            }else{
+                start = 75;
+                audio.currentTime = (e.pageX - start) * audio.duration / parseInt(document.body.clientWidth-88);
+            }
+        }
+    </script>
+</body>
+</html>
